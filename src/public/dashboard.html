@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HeySalad Kelly Server Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // Custom Tailwind configuration
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'heysalad-cherry-red': '#ed4c4c',
+                        'heysalad-peach': '#faa09a',
+                        'heysalad-light-peach': '#ffd0cd',
+                        'heysalad-white': '#ffffff'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        body {
+            background-color: #ffd0cd;
+        }
+        #logo {
+            max-height: 50px;
+            max-width: 150px;
+            background-color: white;
+        }
+        .card {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body class="font-sans bg-heysalad-light-peach">
+    <div class="container mx-auto px-4 py-8">
+        <div class="bg-heysalad-white shadow-lg rounded-lg overflow-hidden">
+            <!-- Header -->
+            <div class="bg-heysalad-cherry-red text-white px-6 py-4 flex justify-between items-center">
+                <div class="flex items-center">
+                    <img id="logo" src="/static/hsd_b.svg" alt="HeySalad Logo" class="mr-4 p-1 bg-white rounded">
+                    <h1 class="text-2xl font-bold">Kelly Server Dashboard</h1>
+                </div>
+                <div id="serverStatus" class="flex items-center">
+                    <span class="h-3 w-3 bg-green-500 rounded-full mr-2 pulse"></span>
+                    <span id="statusText" class="text-white">Running</span>
+                </div>
+            </div>
+
+            <!-- Main Content Grid -->
+            <div class="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Server Metrics -->
+                <div class="bg-heysalad-light-peach rounded-lg p-4 shadow card">
+                    <h2 class="text-xl font-semibold mb-4 text-heysalad-cherry-red">Server Metrics</h2>
+                    <div id="serverMetrics" class="text-gray-800">
+                        <p class="mb-2"><strong>Uptime:</strong> <span id="uptime">Loading...</span></p>
+                        <p class="mb-2"><strong>Memory Used:</strong> <span id="memoryUsed">Loading...</span></p>
+                        <p class="mb-2"><strong>CPU Usage:</strong> <span id="cpuUsage">Loading...</span></p>
+                        <p><strong>System:</strong> <span id="systemInfo">Loading...</span></p>
+                    </div>
+                </div>
+
+                <!-- WebSocket Clients -->
+                <div class="bg-heysalad-light-peach rounded-lg p-4 shadow card">
+                    <h2 class="text-xl font-semibold mb-4 text-heysalad-cherry-red">WebSocket Clients</h2>
+                    <div id="websocketClients" class="text-gray-800">
+                        <p class="mb-2"><strong>Total Clients:</strong> <span id="totalClients">0</span></p>
+                        <div id="clientList" class="space-y-2">
+                            <p>No active clients</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Resources -->
+                <div class="bg-heysalad-light-peach rounded-lg p-4 shadow card">
+                    <h2 class="text-xl font-semibold mb-4 text-heysalad-cherry-red">System Resources</h2>
+                    <canvas id="resourceChart"></canvas>
+                    <div class="mt-4 text-center">
+                        <p class="text-sm text-gray-600">
+                            <strong>Disk Space:</strong> 
+                            <span id="diskSpace">Loading...</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Logs Section -->
+            <div class="p-6 bg-heysalad-peach">
+                <h2 class="text-xl font-semibold mb-4 text-heysalad-cherry-red">Recent Logs</h2>
+                <div id="logContainer" class="bg-heysalad-white rounded-lg p-4 max-h-64 overflow-y-auto">
+                    <!-- Logs will be dynamically populated -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // WebSocket for real-time updates
+        const socket = new WebSocket(`ws://${window.location.host}`);
+
+        // Fetch and update server metrics
+        async function updateServerMetrics() {
+            try {
+                const [metricsResponse, systemResponse] = await Promise.all([
+                    fetch('/api/server/metrics'),
+                    fetch('/api/system/info')
+                ]);
+                
+                const metrics = await metricsResponse.json();
+                const systemInfo = await systemResponse.json();
+                
+                // Update uptime
+                document.getElementById('uptime').textContent = 
+                    `${Math.floor(metrics.uptime / 60)} minutes`;
+                
+                // Update memory
+                document.getElementById('memoryUsed').textContent = 
+                    `${(metrics.memory.heapUsed / 1024 / 1024).toFixed(2)} MB / ${(metrics.memory.heapTotal / 1024 / 1024).toFixed(2)} MB`;
+                
+                // Update system info
+                document.getElementById('systemInfo').textContent = 
+                    `${systemInfo.platform.type} ${systemInfo.platform.release}`;
+                
+                // Update CPU usage (placeholder)
+                document.getElementById('cpuUsage').textContent = 
+                    `${systemInfo.cpus.length} cores`;
+                
+                // Update disk space
+                document.getElementById('diskSpace').textContent = 
+                    `${(systemInfo.memory.free / (1024 * 1024 * 1024)).toFixed(2)} GB free`;
+
+            } catch (error) {
+                console.error('Failed to fetch metrics:', error);
+            }
+        }
+
+        // Fetch and update WebSocket clients
+        async function updateWebSocketClients() {
+            try {
+                const response = await fetch('/api/websocket/clients');
+                const clientData = await response.json();
+                
+                // Update total clients
+                document.getElementById('totalClients').textContent = clientData.totalClients;
+                
+                // Update client list
+                const clientList = document.getElementById('clientList');
+                if (clientData.clients.length > 0) {
+                    clientList.innerHTML = clientData.clients.map(client => `
+                        <div class="bg-gray-200 rounded p-2">
+                            <p class="text-sm">
+                                Client #${client.id} 
+                                <span class="text-xs text-gray-600">
+                                    (${client.readyState === 1 ? 'Connected' : 'Disconnected'})
+                                </span>
+                            </p>
+                        </div>
+                    `).join('');
+                } else {
+                    clientList.innerHTML = '<p>No active clients</p>';
+                }
+            } catch (error) {
+                console.error('Failed to fetch WebSocket clients:', error);
+            }
+        }
+
+        // Create resource utilization chart
+        function createResourceChart() {
+            const ctx = document.getElementById('resourceChart').getContext('2d');
+            return new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Memory Used', 'Memory Free'],
+                    datasets: [{
+                        data: [70, 30],
+                        backgroundColor: ['#ed4c4c', '#faa09a']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        title: { 
+                            display: true, 
+                            text: 'System Resources',
+                            color: '#ed4c4c'
+                        }
+                    }
+                }
+            });
+        }
+
+        // Fetch and update logs
+        async function updateLogs() {
+            try {
+                const response = await fetch('/api/server/logs');
+                const logs = await response.json();
+                
+                const logContainer = document.getElementById('logContainer');
+                if (logs.length > 0) {
+                    const logsHtml = logs.map(log => `
+                        <div class="border-b py-2 last:border-b-0">
+                            <p class="text-sm text-gray-600">${log.timestamp}</p>
+                            <p class="text-gray-800">${log.message}</p>
+                        </div>
+                    `).join('');
+                    
+                    logContainer.innerHTML = logsHtml;
+                } else {
+                    logContainer.innerHTML = '<p class="text-gray-600">No logs available</p>';
+                }
+            } catch (error) {
+                console.error('Failed to fetch logs:', error);
+            }
+        }
+
+        // WebSocket event handlers
+        socket.onopen = () => {
+            document.getElementById('statusText').textContent = 'Connected';
+            document.getElementById('serverStatus').querySelector('span').classList.remove('bg-red-500');
+            document.getElementById('serverStatus').querySelector('span').classList.add('bg-green-500');
+        };
+
+        socket.onclose = () => {
+            document.getElementById('statusText').textContent = 'Disconnected';
+            document.getElementById('serverStatus').querySelector('span').classList.remove('bg-green-500');
+            document.getElementById('serverStatus').querySelector('span').classList.add('bg-red-500');
+        };
+
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            // Handle different types of real-time updates
+            switch(data.type) {
+                case 'metrics':
+                    updateServerMetrics();
+                    break;
+                case 'websocket_clients':
+                    updateWebSocketClients();
+                    break;
+                case 'log':
+                    updateLogs();
+                    break;
+            }
+        };
+
+        // Initial setup
+        document.addEventListener('DOMContentLoaded', () => {
+            createResourceChart();
+            updateServerMetrics();
+            updateWebSocketClients();
+            updateLogs();
+
+            // Periodic updates
+            setInterval(updateServerMetrics, 5000);
+            setInterval(updateWebSocketClients, 10000);
+            setInterval(updateLogs, 30000);
+        });
+    </script>
+</body>
+</html>

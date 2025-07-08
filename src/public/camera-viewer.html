@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HeySalad Camera Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .camera-feed {
+            width: 240px;
+            height: 240px;
+            border-radius: 50%;
+            overflow: hidden;
+            margin: 0 auto;
+        }
+        .camera-feed img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans">
+    <div class="container mx-auto px-4 py-8">
+        <header class="bg-red-500 text-white px-6 py-4 rounded-t-lg flex justify-between items-center">
+            <h1 class="text-2xl font-bold">HeySalad Camera Viewer</h1>
+            <div id="connectionStatus" class="flex items-center">
+                <span class="h-3 w-3 bg-green-500 rounded-full mr-2 pulse"></span>
+                <span>Connected</span>
+            </div>
+        </header>
+        
+        <main class="bg-white p-6 rounded-b-lg shadow-md">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Camera List -->
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-700">Cameras</h2>
+                    <div id="cameraList" class="space-y-2">
+                        <p class="text-gray-500">Loading cameras...</p>
+                    </div>
+                </div>
+                
+                <!-- Camera Feed -->
+                <div class="bg-gray-50 p-4 rounded-lg md:col-span-2">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-700">Camera Feed</h2>
+                    <div class="camera-feed bg-black mb-4 shadow-lg">
+                        <img id="cameraImage" src="/static/HSK-STANDARD.png" alt="Camera Feed">
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 mb-4">
+                        <button id="startStreamBtn" class="bg-green-500 text-white py-2 px-4 rounded hover:bg-green-600">Start Stream</button>
+                        <button id="stopStreamBtn" class="bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600">Stop Stream</button>
+                        <button id="takePhotoBtn" class="bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600">Take Photo</button>
+                        <button id="standardFaceBtn" class="bg-yellow-500 text-white py-2 px-4 rounded hover:bg-yellow-600">Standard Face</button>
+                    </div>
+                    
+                    <!-- Camera Stats -->
+                    <div class="border-t pt-4">
+                        <h3 class="text-lg font-semibold mb-2 text-gray-700">Camera Stats</h3>
+                        <div class="grid grid-cols-2 gap-2 text-sm">
+                            <div>
+                                <p><strong>Status:</strong> <span id="cameraStatus">Unknown</span></p>
+                                <p><strong>Device ID:</strong> <span id="cameraId">Unknown</span></p>
+                                <p><strong>Firmware:</strong> <span id="cameraFirmware">Unknown</span></p>
+                            </div>
+                            <div>
+                                <p><strong>CPU Temp:</strong> <span id="cameraCpuTemp">Unknown</span></p>
+                                <p><strong>Memory Free:</strong> <span id="cameraMemory">Unknown</span></p>
+                                <p><strong>Last Update:</strong> <span id="cameraLastUpdate">Unknown</span></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Recent Photos -->
+            <div class="mt-6">
+                <h2 class="text-xl font-semibold mb-4 text-gray-700">Recent Photos</h2>
+                <div id="photoGallery" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                    <p class="text-gray-500 col-span-full">No photos available</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Variables to store state
+        let selectedCameraId = null;
+        let isStreaming = false;
+        let streamInterval = null;
+        
+        // DOM elements
+        const cameraImage = document.getElementById('cameraImage');
+        const cameraList = document.getElementById('cameraList');
+        const startStreamBtn = document.getElementById('startStreamBtn');
+        const stopStreamBtn = document.getElementById('stopStreamBtn');
+        const takePhotoBtn = document.getElementById('takePhotoBtn');
+        const standardFaceBtn = document.getElementById('standardFaceBtn');
+        const photoGallery = document.getElementById('photoGallery');
+        const connectionStatus = document.getElementById('connectionStatus');
+        
+        // Camera stats elements
+        const cameraStatus = document.getElementById('cameraStatus');
+        const cameraId = document.getElementById('cameraId');
+        const cameraFirmware = document.getElementById('cameraFirmware');
+        const cameraCpuTemp = document.getElementById('cameraCpuTemp');
+        const cameraMemory = document.getElementById('cameraMemory');
+        const cameraLastUpdate = document.getElementById('cameraLastUpdate');
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchCameras();
+            setInterval(fetchCameras, 10000); // Refresh camera list every 10 seconds
+        });
+        
+        // Button event listeners
+        startStreamBtn.addEventListener('click', startStream);
+        stopStreamBtn.addEventListener('click', stopStream);
+        takePhotoBtn.addEventListener('click', takePhoto);
+        standardFaceBtn.addEventListener('click', showStandardFace);
+        
+        // Fetch available cameras
+        async function fetchCameras() {
+            try {
+                const response = await fetch('/api/cameras');
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success && data.devices && data.devices.length > 0) {
+                    renderCameraList(data.devices);
+                } else {
+                    cameraList.innerHTML = '<p class="text-gray-500">No cameras available</p>';
+                }
+            } catch (error) {
+                console.error('Error fetching cameras:', error);
+                cameraList.innerHTML = `<p class="text-red-500">Error loading cameras: ${error.message}</p>`;
+                updateConnectionStatus(false);
+            }
+        }
+        
+        // Render camera list
+        function renderCameraList(cameras) {
+            cameraList.innerHTML = '';
+            
+            cameras.forEach(camera => {
+                const statusColor = camera.isOnline ? 'bg-green-500' : 'bg-red-500';
+                const lastSeen = new Date(camera.lastSeen).toLocaleTimeString();
+                
+                const cameraItem = document.createElement('div');
+                cameraItem.className = `p-3 border rounded ${selectedCameraId === camera.deviceId ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`;
+                cameraItem.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <p class="font-semibold">${camera.deviceId}</p>
+                            <p class="text-xs text-gray-500">Last seen: ${lastSeen}</p>
+                        </div>
+                        <div class="h-3 w-3 ${statusColor} rounded-full"></div>
+                    </div>
+                `;
+                
+                cameraItem.addEventListener('click', () => {
+                    selectCamera(camera.deviceId);
+                });
+                
+                cameraList.appendChild(cameraItem);
+            });
+            
+            updateConnectionStatus(true);
+        }
+        
+        // Select a camera
+        function selectCamera(deviceId) {
+            selectedCameraId = deviceId;
+            
+            // Highlight selected camera
+            document.querySelectorAll('#cameraList > div').forEach(item => {
+                if (item.textContent.includes(deviceId)) {
+                    item.classList.add('border-blue-500', 'bg-blue-50');
+                } else {
+                    item.classList.remove('border-blue-500', 'bg-blue-50');
+                }
+            });
+            
+            // Fetch camera details
+            fetchCameraDetails(deviceId);
+            
+            // Stop any existing stream
+            stopStream();
+        }
+        
+        // Fetch camera details
+        async function fetchCameraDetails(deviceId) {
+            try {
+                const response = await fetch(`/api/cameras/${deviceId}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success && data.device) {
+                    updateCameraStats(data.device);
+                }
+            } catch (error) {
+                console.error('Error fetching camera details:', error);
+            }
+        }
+        
+        // Update camera stats display
+        function updateCameraStats(device) {
+            cameraId.textContent = device.deviceId || 'Unknown';
+            cameraStatus.textContent = device.status || 'Unknown';
+            cameraFirmware.textContent = device.firmwareVersion || 'Unknown';
+            cameraCpuTemp.textContent = device.cpuTemp ? `${device.cpuTemp.toFixed(1)}°C` : 'Unknown';
+            cameraMemory.textContent = device.memoryFree ? `${(device.memoryFree / 1024).toFixed(1)} KB` : 'Unknown';
+            cameraLastUpdate.textContent = device.lastSeen ? new Date(device.lastSeen).toLocaleTimeString() : 'Unknown';
+        }
+        
+        // Start streaming from selected camera
+        function startStream() {
+            if (!selectedCameraId) {
+                alert('Please select a camera first');
+                return;
+            }
+            
+            // Send command to start streaming
+            sendCameraCommand('start_streaming');
+            
+            // Start polling for frames
+            isStreaming = true;
+            streamInterval = setInterval(fetchLatestFrame, 200); // ~5 FPS
+            
+            // Update UI
+            startStreamBtn.disabled = true;
+            stopStreamBtn.disabled = false;
+            startStreamBtn.classList.add('bg-gray-400');
+            startStreamBtn.classList.remove('bg-green-500', 'hover:bg-green-600');
+        }
+        
+        // Stop streaming
+        function stopStream() {
+            if (streamInterval) {
+                clearInterval(streamInterval);
+                streamInterval = null;
+            }
+            
+            if (isStreaming && selectedCameraId) {
+                sendCameraCommand('stop_streaming');
+            }
+            
+            isStreaming = false;
+            
+            // Update UI
+            startStreamBtn.disabled = false;
+            stopStreamBtn.disabled = true;
+            startStreamBtn.classList.remove('bg-gray-400');
+            startStreamBtn.classList.add('bg-green-500', 'hover:bg-green-600');
+        }
+        
+        // Take a photo
+        function takePhoto() {
+            if (!selectedCameraId) {
+                alert('Please select a camera first');
+                return;
+            }
+            
+            sendCameraCommand('take_photo').then(() => {
+                // After 2 seconds, refresh photos to show the new one
+                setTimeout(fetchPhotos, 2000);
+            });
+        }
+        
+        // Show standard face
+        function showStandardFace() {
+            if (!selectedCameraId) {
+                alert('Please select a camera first');
+                return;
+            }
+            
+            sendCameraCommand('display_image', { image: 'HSK-STANDARD.bmp' });
+        }
+        
+        // Send command to camera
+        async function sendCameraCommand(action, params = {}) {
+            try {
+                const response = await fetch(`/api/camera/${selectedCameraId}/command`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        action,
+                        params
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                
+                const data = await response.json();
+                return data;
+            } catch (error) {
+                console.error(`Error sending ${action} command:`, error);
+                return null;
+            }
+        }
+        
+        // Fetch the latest frame
+        async function fetchLatestFrame() {
+            try {
+                const response = await fetch(`/api/camera/${selectedCameraId}/frames/latest`);
+                if (!response.ok) {
+                    return;
+                }
+                
+                const data = await response.json();
+                
+                if (data.success && data.frame && data.frame.frameData) {
+                    // Update camera image with base64 data
+                    cameraImage.src = `data:image/png;base64,${data.frame.frameData}`;
+                }
+            } catch (error) {
+                console.error('Error fetching latest frame:', error);
+            }
+        }
+        
+        // Fetch photos for gallery
+        async function fetchPhotos() {
+            try {
+                const response = await fetch(`/api/camera/${selectedCameraId}/photos`);
+                if (!response.ok) {
+                    return;
+                }
+                
+                const data = await response.json();
+                
+                if (data.success && data.photos && data.photos.length > 0) {
+                    renderPhotoGallery(data.photos);
+                } else {
+                    photoGallery.innerHTML = '<p class="text-gray-500 col-span-full">No photos available</p>';
+                }
+            } catch (error) {
+                console.error('Error fetching photos:', error);
+            }
+        }
+        
+        // Render photo gallery
+        function renderPhotoGallery(photos) {
+            photoGallery.innerHTML = '';
+            
+            photos.forEach(photo => {
+                const photoElement = document.createElement('div');
+                photoElement.className = 'cursor-pointer';
+                photoElement.innerHTML = `
+                    <div class="aspect-square overflow-hidden rounded">
+                        <img src="data:image/png;base64,${photo.imageData}" 
+                             alt="Photo" 
+                             class="w-full h-full object-cover" />
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1">${new Date(photo.timestamp).toLocaleTimeString()}</p>
+                `;
+                
+                photoElement.addEventListener('click', () => {
+                    // Show larger view of photo when clicked
+                    cameraImage.src = `data:image/png;base64,${photo.imageData}`;
+                });
+                
+                photoGallery.appendChild(photoElement);
+            });
+        }
+        
+        // Update connection status indicator
+        function updateConnectionStatus(isConnected) {
+            const statusDot = connectionStatus.querySelector('span:first-child');
+            const statusText = connectionStatus.querySelector('span:last-child');
+            
+            if (isConnected) {
+                statusDot.classList.remove('bg-red-500');
+                statusDot.classList.add('bg-green-500', 'pulse');
+                statusText.textContent = 'Connected';
+            } else {
+                statusDot.classList.remove('bg-green-500', 'pulse');
+                statusDot.classList.add('bg-red-500');
+                statusText.textContent = 'Disconnected';
+            }
+        }
+    </script>
+</body>
+</html>
